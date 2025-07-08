@@ -2,10 +2,11 @@ import { useState, useEffect } from 'react';
 import { 
   FiUsers, FiUserPlus, FiSearch, FiFilter, 
   FiEdit2, FiTrash2, FiDownload, FiChevronRight,
-  FiChevronLeft, FiX, FiCheck, FiAlertCircle
+  FiChevronLeft, FiX, FiCheck, FiAlertCircle,
+  FiEye, FiRefreshCw
 } from 'react-icons/fi';
 import { useTheme } from '../context/ThemeContext';
-import { exportToCSV } from "../utils/exportHelpers";
+import { toast } from 'react-toastify';
 
 const UsersPage = () => {
   const { theme } = useTheme();
@@ -18,137 +19,141 @@ const UsersPage = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalUsers, setTotalUsers] = useState(0);
   const usersPerPage = 10;
 
-  // Obtener usuarios reales del backend
-  useEffect(() => {
+  // Obtener usuarios del backend
+  const fetchUsers = async (page = 1, search = '', status = 'all') => {
     setLoading(true);
     setError(null);
-    const fetchUsers = async () => {
-      const token = localStorage.getItem('token');
-      if (!token) {
-        setError('No has iniciado sesión. Por favor, inicia sesión para ver los usuarios.');
-        setLoading(false);
-        setUsers([]);
-        setFilteredUsers([]);
-        return;
-      }
-      try {
-        const response = await fetch('http://localhost:8000/users', {
-          headers: {
-            'Authorization': `Bearer ${token}`
-          }
-        });
-        if (!response.ok) throw new Error('No autorizado o error de red');
-        const data = await response.json();
-        setUsers(data);
-        setFilteredUsers(data);
-      } catch (err) {
-        setError('Error al cargar usuarios');
-        setUsers([]);
-        setFilteredUsers([]);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchUsers();
-  }, []);
+    
+    const token = localStorage.getItem('token');
+    if (!token) {
+      setError('No has iniciado sesión. Por favor, inicia sesión para ver los usuarios.');
+      setLoading(false);
+      return;
+    }
 
-  // Filtros y búsqueda
+    try {
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: usersPerPage.toString(),
+      });
+      
+      if (search) params.append('search', search);
+      if (status !== 'all') params.append('status', status);
+
+      const response = await fetch(`http://127.0.0.1:8000/users?${params}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error('Error al cargar usuarios');
+      }
+
+      const data = await response.json();
+      setUsers(data.users || []);
+      setFilteredUsers(data.users || []);
+      setTotalUsers(data.total || 0);
+      setTotalPages(data.pages || 1);
+      setCurrentPage(data.page || 1);
+    } catch (err) {
+      setError('Error al cargar usuarios');
+      toast.error('Error al cargar usuarios');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    let results = users;
-    
-    if (searchTerm) {
-      results = results.filter(user => 
-        user.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-        user.email.toLowerCase().includes(searchTerm.toLowerCase())
-      );
-    }
-    
-    if (statusFilter !== 'all') {
-      results = results.filter(user => user.status === statusFilter);
-    }
-    
-    setFilteredUsers(results);
-    setCurrentPage(1);
-  }, [searchTerm, statusFilter, users]);
-
-  // Paginación
-  const indexOfLastUser = currentPage * usersPerPage;
-  const indexOfFirstUser = indexOfLastUser - usersPerPage;
-  const currentUsers = filteredUsers.slice(indexOfFirstUser, indexOfLastUser);
-  const totalPages = Math.ceil(filteredUsers.length / usersPerPage);
+    fetchUsers(currentPage, searchTerm, statusFilter);
+  }, [currentPage, searchTerm, statusFilter]);
 
   const handleEdit = (user) => {
     setCurrentUser(user);
     setIsModalOpen(true);
   };
 
-  // Eliminar usuario usando la API real
   const handleDelete = async (card_id) => {
-    const token = localStorage.getItem('token');
     if (!window.confirm('¿Seguro que deseas eliminar este usuario?')) return;
+    
+    const token = localStorage.getItem('token');
     try {
-      const response = await fetch(`http://localhost:8000/users/${card_id}`, {
+      const response = await fetch(`http://127.0.0.1:8000/users/${card_id}`, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`
         }
       });
+      
       if (!response.ok) throw new Error('Error al eliminar usuario');
-      setUsers(users.filter(u => u.card_id !== card_id));
+      
+      toast.success('Usuario eliminado correctamente');
+      fetchUsers(currentPage, searchTerm, statusFilter);
     } catch (err) {
-      setError(err.message);
+      toast.error('Error al eliminar usuario');
     }
   };
 
-  // Editar y crear usuarios usando la API real
-  const handleSubmit = async (userData) => {
+  const handleSubmit = async (formData) => {
     const token = localStorage.getItem('token');
     try {
-      if (currentUser) {
-        // PUT al backend
-        const response = await fetch(`http://localhost:8000/users/${currentUser.card_id}`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(userData)
-        });
-        if (!response.ok) throw new Error('Error al editar usuario');
-        const updated = await response.json();
-        setUsers(users.map(u => u.card_id === currentUser.card_id ? updated : u));
-      } else {
-        // POST al backend
-        const response = await fetch('http://localhost:8000/users', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${token}`
-          },
-          body: JSON.stringify(userData)
-        });
-        if (!response.ok) throw new Error('Error al crear usuario');
-        const created = await response.json();
-        setUsers([...users, created.user]);
-      }
+      const url = currentUser 
+        ? `http://127.0.0.1:8000/users/${currentUser.card_id}`
+        : 'http://127.0.0.1:8000/users';
+      
+      const method = currentUser ? 'PUT' : 'POST';
+      
+      const response = await fetch(url, {
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(formData)
+      });
+
+      if (!response.ok) throw new Error('Error al guardar usuario');
+
+      toast.success(currentUser ? 'Usuario actualizado correctamente' : 'Usuario creado correctamente');
       setIsModalOpen(false);
       setCurrentUser(null);
+      fetchUsers(currentPage, searchTerm, statusFilter);
     } catch (err) {
-      setError(err.message);
+      toast.error('Error al guardar usuario');
     }
   };
 
   const handleExport = () => {
-    exportToCSV(filteredUsers, 'usuarios_gimnasio');
+    const csvContent = [
+      ['Nombre', 'Email', 'Teléfono', 'Membresía', 'Estado', 'Último Acceso'],
+      ...filteredUsers.map(user => [
+        user.name,
+        user.email,
+        user.phone,
+        user.membership,
+        user.status,
+        user.lastAccess
+      ])
+    ].map(row => row.join(',')).join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'usuarios_gimnasio.csv';
+    a.click();
+    window.URL.revokeObjectURL(url);
+    toast.success('Datos exportados correctamente');
   };
 
   const statusOptions = [
     { value: 'all', label: 'Todos los estados' },
     { value: 'active', label: 'Activos' },
-    { value: 'inactive', label: 'Inactivos' },
-    { value: 'pending', label: 'Pendientes' }
+    { value: 'inactive', label: 'Inactivos' }
   ];
 
   const membershipOptions = [
@@ -163,8 +168,6 @@ const UsersPage = () => {
     switch(status) {
       case 'active':
         return `${baseClasses} bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200`;
-      case 'pending':
-        return `${baseClasses} bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200`;
       case 'inactive':
         return `${baseClasses} bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200`;
       default:
@@ -182,18 +185,26 @@ const UsersPage = () => {
               <FiUsers className="mr-3" /> Gestión de Usuarios
             </h1>
             <p className={`mt-2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-              Administra los miembros y sus membresías del gimnasio
+              Administra los miembros y sus membresías del gimnasio ({totalUsers} usuarios)
             </p>
           </div>
-          <div className="mt-4 md:mt-0">
+          <div className="mt-4 md:mt-0 flex space-x-3">
+            <button
+              onClick={() => fetchUsers(currentPage, searchTerm, statusFilter)}
+              className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium ${
+                theme === 'dark' 
+                  ? 'bg-gray-700 text-gray-300 hover:bg-gray-600' 
+                  : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
+              }`}
+            >
+              <FiRefreshCw className="mr-2" /> Actualizar
+            </button>
             <button
               onClick={() => {
                 setCurrentUser(null);
                 setIsModalOpen(true);
               }}
-              className={`inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 ${
-                theme === 'dark' ? 'focus:ring-offset-gray-900' : ''
-              }`}
+              className="inline-flex items-center px-4 py-2 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
             >
               <FiUserPlus className="mr-2" /> Nuevo Usuario
             </button>
@@ -221,13 +232,11 @@ const UsersPage = () => {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <label htmlFor="status-filter" className="sr-only">Estado</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <FiFilter className={`h-5 w-5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`} />
                   </div>
                   <select
-                    id="status-filter"
                     className={`block w-full pl-10 pr-3 py-3 border rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                       theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'border-gray-300 text-gray-900'
                     }`}
@@ -274,13 +283,10 @@ const UsersPage = () => {
                   <thead className={theme === 'dark' ? 'bg-gray-800' : 'bg-gray-50'}>
                     <tr>
                       <th scope="col" className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
-                        Nombre
+                        Usuario
                       </th>
                       <th scope="col" className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
-                        Email
-                      </th>
-                      <th scope="col" className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
-                        Teléfono
+                        Contacto
                       </th>
                       <th scope="col" className={`px-6 py-4 text-left text-xs font-medium uppercase tracking-wider ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
                         Membresía
@@ -297,24 +303,46 @@ const UsersPage = () => {
                     </tr>
                   </thead>
                   <tbody className={`divide-y divide-gray-200 dark:divide-gray-700 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}>
-                    {currentUsers.length > 0 ? (
-                      currentUsers.map((user) => (
-                        <tr key={user.id} className={theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
-                          <td className={`px-6 py-4 whitespace-nowrap text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-                            {user.name}
+                    {filteredUsers.length > 0 ? (
+                      filteredUsers.map((user) => (
+                        <tr key={user.card_id} className={theme === 'dark' ? 'hover:bg-gray-700' : 'hover:bg-gray-50'}>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className="flex items-center">
+                              <div className={`flex-shrink-0 h-10 w-10 rounded-full ${theme === 'dark' ? 'bg-gray-600' : 'bg-gray-200'} flex items-center justify-center`}>
+                                <span className={`text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                                  {user.name?.charAt(0)?.toUpperCase()}
+                                </span>
+                              </div>
+                              <div className="ml-4">
+                                <div className={`text-sm font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                                  {user.name}
+                                </div>
+                                <div className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                                  ID: {user.card_id}
+                                </div>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <div className={`text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-900'}`}>
+                              {user.email}
+                            </div>
+                            <div className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                              {user.phone}
+                            </div>
                           </td>
                           <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
-                            {user.email}
-                          </td>
-                          <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
-                            {user.phone}
-                          </td>
-                          <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
-                            {user.membership}
+                            <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                              user.membership === 'VIP' ? 'bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200' :
+                              user.membership === 'Premium' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200' :
+                              'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+                            }`}>
+                              {user.membership}
+                            </span>
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap">
                             <span className={statusBadge(user.status)}>
-                              {user.status === 'active' ? 'Activo' : user.status === 'pending' ? 'Pendiente' : 'Inactivo'}
+                              {user.status === 'active' ? 'Activo' : 'Inactivo'}
                             </span>
                           </td>
                           <td className={`px-6 py-4 whitespace-nowrap text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-500'}`}>
@@ -342,7 +370,7 @@ const UsersPage = () => {
                       ))
                     ) : (
                       <tr>
-                        <td colSpan="7" className={`px-6 py-4 text-center text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                        <td colSpan="6" className={`px-6 py-4 text-center text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                           No se encontraron usuarios
                         </td>
                       </tr>
@@ -352,7 +380,7 @@ const UsersPage = () => {
               </div>
 
               {/* Paginación */}
-              {filteredUsers.length > usersPerPage && (
+              {totalPages > 1 && (
                 <div className={`px-6 py-4 flex items-center justify-between border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
                   <div className="flex-1 flex justify-between sm:hidden">
                     <button
@@ -389,13 +417,13 @@ const UsersPage = () => {
                   <div className="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
                     <div>
                       <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-700'}`}>
-                        Mostrando <span className="font-medium">{indexOfFirstUser + 1}</span> a{' '}
-                        <span className="font-medium">{Math.min(indexOfLastUser, filteredUsers.length)}</span> de{' '}
-                        <span className="font-medium">{filteredUsers.length}</span> usuarios
+                        Mostrando <span className="font-medium">{((currentPage - 1) * usersPerPage) + 1}</span> a{' '}
+                        <span className="font-medium">{Math.min(currentPage * usersPerPage, totalUsers)}</span> de{' '}
+                        <span className="font-medium">{totalUsers}</span> usuarios
                       </p>
                     </div>
                     <div>
-                      <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px" aria-label="Pagination">
+                      <nav className="relative z-0 inline-flex rounded-md shadow-sm -space-x-px">
                         <button
                           onClick={() => setCurrentPage(prev => Math.max(prev - 1, 1))}
                           disabled={currentPage === 1}
@@ -409,9 +437,9 @@ const UsersPage = () => {
                                 : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                           }`}
                         >
-                          <span className="sr-only">Anterior</span>
                           <FiChevronLeft className="h-5 w-5" />
                         </button>
+                        
                         {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
                           let pageNum;
                           if (totalPages <= 5) {
@@ -442,6 +470,7 @@ const UsersPage = () => {
                             </button>
                           );
                         })}
+                        
                         <button
                           onClick={() => setCurrentPage(prev => Math.min(prev + 1, totalPages))}
                           disabled={currentPage === totalPages}
@@ -455,7 +484,6 @@ const UsersPage = () => {
                                 : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
                           }`}
                         >
-                          <span className="sr-only">Siguiente</span>
                           <FiChevronRight className="h-5 w-5" />
                         </button>
                       </nav>
@@ -469,83 +497,92 @@ const UsersPage = () => {
 
         {/* Modal para editar/crear usuario */}
         {isModalOpen && (
-          <div className={`fixed inset-0 overflow-y-auto ${theme === 'dark' ? 'bg-gray-900 bg-opacity-75' : 'bg-gray-500 bg-opacity-75'}`}>
+          <div className="fixed inset-0 z-50 overflow-y-auto">
             <div className="flex items-center justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-              <div className="fixed inset-0 transition-opacity" aria-hidden="true">
-                <div className="absolute inset-0 bg-gray-500 opacity-75"></div>
-              </div>
-              <span className="hidden sm:inline-block sm:align-middle sm:h-screen" aria-hidden="true">&#8203;</span>
+              <div className="fixed inset-0 transition-opacity bg-gray-500 bg-opacity-75" onClick={() => setIsModalOpen(false)}></div>
+              
               <div className={`inline-block align-bottom rounded-lg text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-lg sm:w-full ${
                 theme === 'dark' ? 'bg-gray-800' : 'bg-white'
               }`}>
-                <div className={`px-4 pt-5 pb-4 sm:p-6 sm:pb-4 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}>
-                  <div className="flex items-start justify-between">
-                    <h3 className={`text-lg leading-6 font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
-                      {currentUser ? 'Editar Usuario' : 'Crear Nuevo Usuario'}
-                    </h3>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsModalOpen(false);
-                        setCurrentUser(null);
-                      }}
-                      className={`rounded-md p-1.5 ${theme === 'dark' ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-100'}`}
-                    >
-                      <FiX className="h-6 w-6" />
-                    </button>
-                  </div>
-                  <div className="mt-4">
+                <form onSubmit={(e) => {
+                  e.preventDefault();
+                  const formData = new FormData(e.target);
+                  const data = {
+                    name: formData.get('name'),
+                    email: formData.get('email'),
+                    phone: formData.get('phone'),
+                    membership: formData.get('membership'),
+                    active: formData.get('active') === 'on'
+                  };
+                  handleSubmit(data);
+                }}>
+                  <div className={`px-4 pt-5 pb-4 sm:p-6 sm:pb-4 ${theme === 'dark' ? 'bg-gray-800' : 'bg-white'}`}>
+                    <div className="flex items-start justify-between mb-4">
+                      <h3 className={`text-lg leading-6 font-medium ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>
+                        {currentUser ? 'Editar Usuario' : 'Crear Nuevo Usuario'}
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => setIsModalOpen(false)}
+                        className={`rounded-md p-1.5 ${theme === 'dark' ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-400 hover:bg-gray-100'}`}
+                      >
+                        <FiX className="h-6 w-6" />
+                      </button>
+                    </div>
+                    
                     <div className="space-y-4">
                       <div>
-                        <label htmlFor="name" className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                        <label className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
                           Nombre completo
                         </label>
                         <input
                           type="text"
-                          id="name"
                           name="name"
+                          required
                           defaultValue={currentUser?.name || ''}
                           className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                             theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'border-gray-300'
                           }`}
                         />
                       </div>
+                      
                       <div>
-                        <label htmlFor="email" className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                        <label className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
                           Email
                         </label>
                         <input
                           type="email"
-                          id="email"
                           name="email"
+                          required
                           defaultValue={currentUser?.email || ''}
                           className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                             theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'border-gray-300'
                           }`}
                         />
                       </div>
+                      
                       <div>
-                        <label htmlFor="phone" className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                        <label className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
                           Teléfono
                         </label>
                         <input
                           type="tel"
-                          id="phone"
                           name="phone"
+                          required
                           defaultValue={currentUser?.phone || ''}
                           className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                             theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'border-gray-300'
                           }`}
                         />
                       </div>
+                      
                       <div>
-                        <label htmlFor="membership" className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                        <label className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
                           Membresía
                         </label>
                         <select
-                          id="membership"
                           name="membership"
-                          defaultValue={currentUser?.membership ? currentUser.membership.toLowerCase() : 'basic'}
+                          defaultValue={currentUser?.membership?.toLowerCase() || 'basic'}
                           className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
                             theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'border-gray-300'
                           }`}
@@ -557,61 +594,40 @@ const UsersPage = () => {
                           ))}
                         </select>
                       </div>
-                      {currentUser && (
-                        <div>
-                          <label htmlFor="status" className={`block text-sm font-medium ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                            Estado
-                          </label>
-                          <select
-                            id="status"
-                            name="status"
-                            defaultValue={currentUser?.status || 'active'}
-                            className={`mt-1 block w-full rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm ${
-                              theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'border-gray-300'
-                            }`}
-                          >
-                            <option value="active">Activo</option>
-                            <option value="inactive">Inactivo</option>
-                            <option value="pending">Pendiente</option>
-                          </select>
-                        </div>
-                      )}
+                      
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          name="active"
+                          defaultChecked={currentUser?.active !== false}
+                          className="h-4 w-4 text-blue-600 focus:ring-blue-500 border-gray-300 rounded"
+                        />
+                        <label className={`ml-2 block text-sm ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
+                          Usuario activo
+                        </label>
+                      </div>
                     </div>
                   </div>
-                </div>
-                <div className={`px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse ${theme === 'dark' ? 'bg-gray-800' : 'bg-gray-50'}`}>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      const formData = {
-                        name: document.getElementById('name').value,
-                        email: document.getElementById('email').value,
-                        phone: document.getElementById('phone').value,
-                        membership: document.getElementById('membership').value,
-                        status: currentUser ? document.getElementById('status')?.value : 'active'
-                      };
-                      handleSubmit(formData);
-                    }}
-                    className={`w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 text-base font-medium text-white sm:ml-3 sm:w-auto sm:text-sm ${
-                      theme === 'dark' ? 'bg-blue-600 hover:bg-blue-700' : 'bg-blue-600 hover:bg-blue-700'
-                    }`}
-                  >
-                    <FiCheck className="mr-2 h-5 w-5" />
-                    {currentUser ? 'Actualizar' : 'Guardar'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsModalOpen(false);
-                      setCurrentUser(null);
-                    }}
-                    className={`mt-3 w-full inline-flex justify-center rounded-md border shadow-sm px-4 py-2 text-base font-medium sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm ${
-                      theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
-                    }`}
-                  >
-                    Cancelar
-                  </button>
-                </div>
+                  
+                  <div className={`px-4 py-3 sm:px-6 sm:flex sm:flex-row-reverse ${theme === 'dark' ? 'bg-gray-800' : 'bg-gray-50'}`}>
+                    <button
+                      type="submit"
+                      className="w-full inline-flex justify-center rounded-md border border-transparent shadow-sm px-4 py-2 bg-blue-600 text-base font-medium text-white hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 sm:ml-3 sm:w-auto sm:text-sm"
+                    >
+                      <FiCheck className="mr-2 h-5 w-5" />
+                      {currentUser ? 'Actualizar' : 'Crear'}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsModalOpen(false)}
+                      className={`mt-3 w-full inline-flex justify-center rounded-md border shadow-sm px-4 py-2 text-base font-medium sm:mt-0 sm:ml-3 sm:w-auto sm:text-sm ${
+                        theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white hover:bg-gray-600' : 'bg-white border-gray-300 text-gray-700 hover:bg-gray-50'
+                      }`}
+                    >
+                      Cancelar
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>
