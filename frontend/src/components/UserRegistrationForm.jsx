@@ -57,10 +57,12 @@ const UserRegistrationForm = ({ onSuccess }) => {
     setIsLoading(true);
 
     try {
-      const response = await fetch('http://localhost:8000/register_user', {
+      const token = localStorage.getItem('token');
+      const response = await fetch('http://127.0.0.1:8000/users', {
         method: 'POST',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify(formData)
       });
@@ -68,11 +70,11 @@ const UserRegistrationForm = ({ onSuccess }) => {
       const data = await response.json();
 
       if (!response.ok) {
-        throw new Error(data.message || 'Error en el registro');
+        throw new Error(data.detail || 'Error en el registro');
       }
 
       setSuccess('Usuario registrado exitosamente!');
-      setGeneratedCardId(data.card_id || '');
+      setGeneratedCardId(data.user?.card_id || '');
       
       // Limpiar formulario
       setFormData({
